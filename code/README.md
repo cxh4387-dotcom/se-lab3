@@ -41,6 +41,9 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
+Windows 下如果项目路径包含中文，`MinGW Makefiles` 生成器可能报
+"No rule to make target"，改用 `-G Ninja`，或把项目放到纯英文路径。
+
 如果构建机不能联网，可先把 googletest 源码放到本地，再指定：
 
 ```bash
