@@ -1,0 +1,54 @@
+@startuml UML状态图-订单
+title 外卖点餐与配送系统 —— 状态图：订单生命周期
+skinparam shadowing false
+skinparam defaultFontName "Microsoft YaHei"
+skinparam state {
+  BackgroundColor #F4F9FD
+  BorderColor #2C5F8A
+  ArrowColor #4A6B85
+  BackgroundColor<<终态>> #EDEDED
+  BorderColor<<终态>> #8C8C8C
+}
+
+[*] --> 待接单 : 顾客提交订单成功
+待接单 --> 已接单 : 商家接单 / accept()
+待接单 --> 已拒单 : 商家拒单（必填原因）
+待接单 --> 已取消 : 顾客取消 / 系统 5 分钟超时
+已接单 --> 待取餐 : 商家制作完成 / ready()
+已接单 --> 已取消 : 顾客申请且商家同意（未制作完）
+待取餐 --> 配送中 : 骑手确认取餐 / acceptTask()
+配送中 --> 已完成 : 顾客确认 / 送达 30 分钟自动确认
+配送中 --> 配送失败 : 骑手报备（必填原因）
+配送失败 --> 配送中 : 管理员重新派单
+已拒单 --> 已退款 : 退款登记成功
+已取消 --> 已退款 : 退款登记成功
+配送失败 --> 已退款 : 管理员核实的全额退款
+
+state 已完成 <<终态>>
+state 已退款 <<终态>>
+state 已取消 <<终态>>
+
+note right of 待接单
+  进入条件：库存已扣减、总额已校验、
+  幂等键已记录。
+  5 分钟未接单由调度器自动取消
+  （REQ-024），并释放库存、登记退款。
+end note
+
+note left of 配送中
+  只允许骑手本人推进；
+  未取餐不能直接送达（REQ-014）。
+end note
+
+note bottom of 已退款
+  终态：任何变更一律拒绝。
+  退款失败时不进入本状态，
+  而置"退款异常"由管理员重试（REQ-012）。
+end note
+
+note bottom of 已取消
+  终态：库存已按订单号幂等回补，
+  不可恢复原单，顾客可重新下单。
+end note
+
+@enduml

@@ -1,0 +1,73 @@
+@startuml UML时序图-超时取消
+title 外卖点餐与配送系统 —— 时序图：超时未接单自动取消与退款
+skinparam shadowing false
+skinparam defaultFontName "Microsoft YaHei"
+skinparam sequence {
+  ArrowColor #2C5F8A
+  LifeLineBorderColor #9DB4C8
+  ParticipantBorderColor #2C5F8A
+  ParticipantBackgroundColor #F4F9FD
+  GroupBorderColor #C9862B
+  GroupBackgroundColor #FDF8EC
+}
+
+participant "调度器\nTimeoutCancelJob" as J
+participant "订单服务" as O
+participant "退款服务" as R
+participant "库存服务" as I
+participant "审计服务" as L
+participant "通知服务" as N
+database "MySQL" as DB
+
+J -> J : 每分钟扫描\nstatus=待接单 且 超 5 分钟
+J -> DB : SELECT order_no
+activate J
+DB --> J : [orderNo...]
+deactivate J
+
+loop 每个超时订单
+  J -> O : autoCancel(orderNo)
+  activate O
+  O -> DB : BEGIN
+  O -> DB : UPDATE orders SET status=已取消,\nversion=version+1\nWHERE order_no=? AND status='待接单'\nAND version=?
+  alt 影响行数 = 0（商家已接单或他人已处理）
+    DB --> O : 0
+    O -> DB : ROLLBACK
+    O --> J : 跳过（状态已变化，不覆盖）
+  else 影响行数 = 1
+    O -> I : release(orderNo)
+    activate I
+    I -> DB : UPDATE daily_stock\nSET sold=sold-qty\nWHERE stock_id=? AND order_no NOT IN (已释放)
+    I --> O : ok
+    deactivate I
+    O -> R : createRefund(orderNo, amount, "超时未接单")
+    activate R
+    R -> DB : INSERT refund(status=退款中)
+    R --> O : refundId
+    deactivate R
+    O -> L : record(TIMEOUT_CANCEL)
+    activate L
+    L -> DB : INSERT operation_log（同事务）
+    L --> O : ok
+    deactivate L
+    O -> DB : COMMIT
+    O -> N : 通知顾客与商家
+    activate N
+    N --> O : 已投递
+    deactivate N
+    O --> J : 已取消
+  end
+  deactivate O
+end
+
+note over O, DB
+  自动取消与商家接单并发写同一行：
+  条件更新 + 版本号保证只有一方成功（REQ-024、REQ-029）
+end note
+
+note over I
+  释放库存必须幂等：
+  以订单号标记已释放，重复扫描不会二次回补（REQ-010）
+end note
+
+@enduml

@@ -1,0 +1,86 @@
+@startuml UML包图
+title 外卖点餐与配送系统 —— 包图（分层与依赖方向）
+skinparam shadowing false
+skinparam defaultFontName "Microsoft YaHei"
+skinparam packageStyle rectangle
+skinparam nodesep 16
+skinparam ranksep 30
+skinparam package {
+  BackgroundColor #F7FAFD
+  BorderColor #2C5F8A
+  ArrowColor #4A6B85
+  FontSize 13
+}
+skinparam note {
+  BackgroundColor #FBF7E8
+  BorderColor #E2D6A8
+}
+
+package "com.campus.delivery" {
+
+  package "interfaces" as IF {
+    [OrderController]
+    [CatalogController]
+    [AdminController]
+  }
+
+  package "application" as APP {
+    [OrderAppService]
+    [CatalogAppService]
+    [DeliveryAppService]
+    [StatisticsAppService]
+  }
+
+  package "domain" as DOM {
+    package "model" as DOM_M {
+      [Order]
+      [Dish]
+      [DailyStock]
+      [Refund]
+    }
+    package "service" as DOM_S {
+      [OrderStateMachine]
+      [InventoryDomainService]
+    }
+    package "repository" as DOM_R {
+      interface OrderRepository
+      interface DishRepository
+    }
+  }
+
+  package "infrastructure" as INF {
+    [OrderRepositoryImpl]
+    [DishRepositoryImpl]
+    [TimeoutCancelJob]
+    [JwtTokenFilter]
+  }
+
+  package "common" as COM {
+    [BusinessException]
+    [ResultCode]
+  }
+}
+
+IF --> APP : 调用用例
+APP --> DOM : 领域对象/服务
+APP --> COM
+DOM_M --> DOM_S : 状态机校验
+DOM_S --> DOM_R : 依赖接口（倒置）
+[OrderRepositoryImpl] ..|> OrderRepository : 实现
+[DishRepositoryImpl] ..|> DishRepository : 实现
+INF --> DOM : 实现仓储、注入
+[TimeoutCancelJob] --> APP : 触发用例
+[JwtTokenFilter] --> IF : 请求拦截
+
+note right of DOM
+  依赖倒置：domain 不依赖
+  infrastructure，仓储只声明接口，
+  由 infrastructure 实现（可替换、可单测）
+end note
+
+note bottom of INF
+  定时任务只调用 application 用例，
+  不直接写 SQL，保证业务规则唯一
+end note
+
+@enduml

@@ -1,0 +1,88 @@
+@startuml UML部署图
+title 外卖点餐与配送系统 —— 部署图（课程原型：单机双实例）
+skinparam shadowing false
+skinparam defaultFontName "Microsoft YaHei"
+skinparam node {
+  BackgroundColor #F7FAFD
+  BorderColor #2C5F8A
+}
+skinparam database {
+  BackgroundColor #FFF6E8
+  BorderColor #C9862B
+}
+skinparam artifact {
+  BackgroundColor #FFFFFF
+  BorderColor #4A6B85
+}
+skinparam cloud {
+  BackgroundColor #F2F7FB
+  BorderColor #2C5F8A
+}
+
+node "顾客设备\n手机浏览器 / 微信内置浏览器" as N_CUST {
+  artifact "顾客端 H5\n(React + Vite 构建产物)" as A_CUST
+}
+node "商家设备\nPC 浏览器" as N_SHOP {
+  artifact "商家端 Web" as A_SHOP
+}
+node "骑手设备\nAndroid / iOS" as N_RIDER {
+  artifact "骑手端 App / H5" as A_RIDER
+}
+node "运营设备\nPC 浏览器" as N_ADMIN {
+  artifact "运营管理端 Web" as A_ADMIN
+}
+
+node "接入服务器\nNginx 1.24 · 2C4G" as N_NGINX {
+  artifact "反向代理 + 静态资源\nTLS 终止 / 限流" as A_NGINX
+}
+
+node "应用服务器 A\n4C8G · JDK 17" as N_APP1 {
+  artifact "delivery-app.jar\n(模块化单体 · 8080)" as A_APP1
+}
+node "应用服务器 B\n4C8G · JDK 17" as N_APP2 {
+  artifact "delivery-app.jar\n(双实例热备)" as A_APP2
+}
+
+node "调度节点\n2C4G · 与 A/B 同内网" as N_SCHED {
+  artifact "scheduler.jar\n超时取消 / 自动确认 / 日汇总" as A_SCHED
+}
+
+database "MySQL 8.0 主库\n4C16G · 业务库+日志库" as DB_MASTER
+database "MySQL 8.0 从库\n4C16G · 只读与备份" as DB_SLAVE
+database "Redis 6\n2C4G · 会话/热点菜品" as REDIS
+cloud "对象存储 OSS\n菜品图片与导出文件" as OSS
+
+' ---------- 网络连接 ----------
+A_CUST --> A_NGINX : HTTPS 443
+A_SHOP --> A_NGINX : HTTPS 443
+A_RIDER --> A_NGINX : HTTPS 443
+A_ADMIN --> A_NGINX : HTTPS 443
+
+A_NGINX --> A_APP1 : HTTP 8080\n轮询
+A_NGINX --> A_APP2 : HTTP 8080\n轮询
+
+A_APP1 --> DB_MASTER : JDBC 3306
+A_APP2 --> DB_MASTER : JDBC 3306
+A_APP1 --> REDIS : RESP 6379
+A_APP2 --> REDIS : RESP 6379
+A_APP1 --> OSS : HTTPS 上传/下载
+A_SCHED --> DB_MASTER : JDBC
+
+DB_MASTER --> DB_SLAVE : 主从复制 ROW
+
+note right of N_APP1
+  课程原型阶段采用"模块化单体 + 双实例"：
+  单库单事务保证订单/库存/日志一致
+  （REQ-010、REQ-025），
+  日后可按模块拆分为独立服务。
+end note
+
+note bottom of N_SCHED
+  调度任务按分钟扫描：
+  待接单超 5 分钟 → 自动取消并退款；
+  已送达超 30 分钟 → 自动确认完成。
+  多实例部署时以数据库行锁或
+  Redis 分布式锁保证只执行一次。
+end note
+
+@enduml

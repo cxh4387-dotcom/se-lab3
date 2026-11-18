@@ -1,0 +1,105 @@
+@startuml UML用例图
+title 外卖点餐与配送系统 —— 用例图
+skinparam shadowing false
+skinparam defaultFontName "Microsoft YaHei"
+skinparam packageStyle rectangle
+skinparam nodesep 14
+skinparam ranksep 26
+skinparam usecase {
+  BackgroundColor #F4F9FD
+  BorderColor #2C5F8A
+  ArrowColor #4A6B85
+  FontSize 12
+}
+skinparam actor {
+  BackgroundColor #FFF6E8
+  BorderColor #C9862B
+}
+left to right direction
+
+actor "顾客" as C
+actor "商家" as S
+actor "配送人员" as R
+actor "平台管理员" as A
+actor "定时任务\n（系统）" as T <<system>>
+
+rectangle "外卖点餐与配送系统" {
+
+  package "点餐与交易（顾客 / 商家 / 骑手）" {
+    usecase "注册登录" as UC01
+    usecase "维护收货地址" as UC02
+    usecase "浏览与搜索菜品" as UC09
+    usecase "加入购物车" as UC10
+    usecase "提交订单" as UC11
+    usecase "接单 / 拒单" as UC14
+    usecase "制作完成转待取餐" as UC15
+    usecase "指派配送" as UC16
+    usecase "取餐与送达" as UC17
+    usecase "取消订单" as UC19
+    usecase "报备配送失败" as UC18
+  }
+
+  package "平台运营（管理员 / 系统）" {
+    usecase "提交资质材料" as UC03
+    usecase "审核商家/骑手资质" as UC04
+    usecase "设置营业状态" as UC06
+    usecase "维护菜品与价格" as UC07
+    usecase "设置每日库存" as UC08
+    usecase "超时未接单自动取消" as UC21
+    usecase "登记退款并处理异常" as UC20
+  }
+
+  package "查询与审计" {
+    usecase "多条件查询订单" as UC23
+    usecase "查看经营统计" as UC24
+    usecase "查询操作日志" as UC25
+    usecase "角色权限校验" as UC05
+  }
+}
+
+' ---------- 顾客 ----------
+C --> UC01
+C --> UC02
+C --> UC09
+C --> UC10
+C --> UC11
+C --> UC19
+
+' ---------- 商家 ----------
+S --> UC06
+S --> UC07
+S --> UC08
+S --> UC14
+S --> UC15
+S --> UC23
+
+' ---------- 配送人员 ----------
+R --> UC17
+R --> UC18
+
+' ---------- 管理员 ----------
+A --> UC04
+A --> UC16
+A --> UC20
+A --> UC24
+A --> UC25
+
+' ---------- 系统 ----------
+T --> UC21
+
+' ---------- include / extend ----------
+UC11 ..> UC05 : <<include>>
+UC11 ..> UC02 : <<include>>
+UC14 ..> UC15 : <<extend>>\n接单后制作
+UC15 ..> UC16 : <<include>>
+UC21 ..> UC20 : <<include>>
+UC18 ..> UC20 : <<extend>>\n全额退款
+UC19 ..> UC20 : <<extend>>\n未接单可退
+UC25 ..> UC05 : <<include>>
+
+note bottom of UC20
+  拒单、超时、取消、配送失败都由它统一登记退款，
+  失败置"退款异常"，不得显示为已退款（REQ-012）
+end note
+
+@enduml

@@ -1,0 +1,106 @@
+@startuml UML组件图
+title 外卖点餐与配送系统 —— 组件图
+skinparam shadowing false
+skinparam defaultFontName "Microsoft YaHei"
+skinparam componentStyle rectangle
+skinparam packageStyle rectangle
+skinparam component {
+  BackgroundColor #F4F9FD
+  BorderColor #2C5F8A
+  ArrowColor #4A6B85
+}
+
+package "客户端（4 个角色入口）" {
+  [顾客端 H5] as CUST
+  [商家端 Web] as SHOP
+  [骑手端 App] as RIDER
+  [运营管理端 Web] as ADMIN
+}
+
+package "接入层" {
+  [API 网关\n鉴权 / 限流 / 幂等键透传] as GW
+  [会话与令牌服务] as AUTH
+}
+
+package "应用服务层（模块化单体）" {
+  component "账号与权限\nAccountModule" as M1
+  component "店铺与菜品\nCatalogModule" as M2
+  component "库存\nInventoryModule" as M3
+  component "订单\nOrderModule" as M4
+  component "配送\nDeliveryModule" as M5
+  component "退款\nRefundModule" as M6
+  component "统计\nStatisticsModule" as M7
+  component "审计日志\nAuditModule" as M8
+  component "通知\nNotifyModule" as M9
+}
+
+package "基础设施层" {
+  database "MySQL 8.0\n（业务库 + 日志库）" as DB
+  database "Redis\n（会话 / 菜品缓存）" as CACHE
+  [对象存储\n菜品图片] as OSS
+  [调度器\n超时取消 / 自动确认 / 统计汇总] as SCHED
+  [消息出箱 Outbox\n投递与重试] as MQ
+}
+
+' ---------- 客户端到网关 ----------
+CUST --> GW : HTTPS / JSON
+SHOP --> GW : HTTPS / JSON
+RIDER --> GW : HTTPS / JSON
+ADMIN --> GW : HTTPS / JSON
+GW --> AUTH : 校验令牌
+AUTH --> M1 : 角色与权限
+
+' ---------- 网关到各模块（REST） ----------
+GW --> M1
+GW --> M2
+GW --> M4
+GW --> M5
+GW --> M7
+GW --> M8
+
+' ---------- 模块间调用 ----------
+M2 --> M3 : 查询余量 / 重置日库存
+M4 --> M3 : deduct() 条件扣减\nrelease() 幂等释放
+M4 --> M6 : 生成退款单
+M4 --> M8 : 写操作日志（同事务）
+M4 --> M9 : 状态变更通知（Outbox）
+M4 --> M5 : 创建配送任务
+M5 --> M4 : 送达回写状态
+M5 --> M9 : 派单通知
+M6 --> M9 : 退款结果通知
+M7 --> M4 : 只读聚合
+M7 --> M5 : 履约时效
+M9 --> MQ : 投递事件
+MQ --> M9 : 重试
+M1 --> M8 : 登录/越权日志
+M2 --> M8 : 改价/上下架日志
+M5 --> M8 : 派单/配送失败日志
+SCHED --> M4 : 超时未接单扫描
+SCHED --> M5 : 超时未确认扫描
+SCHED --> M7 : 每日汇总
+
+' ---------- 数据访问 ----------
+M1 --> DB
+M2 --> DB
+M3 --> DB
+M4 --> DB
+M5 --> DB
+M6 --> DB
+M7 --> DB
+M8 --> DB
+M2 --> CACHE : 菜品列表缓存
+M2 --> OSS : 图片上传
+
+note right of M4
+  订单模块是编排中心：
+  一次提交订单在本地事务内
+  完成 幂等校验 → 库存扣减 →
+  订单落库 → 日志写入（REQ-008/009/010/018）
+end note
+
+note bottom of M3
+  库存与订单同库同事务，
+  用条件更新（WHERE 余量>=?) 防超卖
+end note
+
+@enduml

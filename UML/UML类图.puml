@@ -1,0 +1,214 @@
+@startuml UML类图
+title 外卖点餐与配送系统 —— 类图（领域模型）
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+skinparam defaultFontName "Microsoft YaHei"
+skinparam packageStyle rectangle
+skinparam nodesep 32
+skinparam ranksep 46
+skinparam class {
+  BackgroundColor #FFFFFF
+  BorderColor #2C5F8A
+  HeaderBackgroundColor #E7EFF7
+  ArrowColor #4A6B85
+}
+hide empty members
+
+package "账号与店铺" {
+  class User <<实体>> {
+    - userId : Long
+    - phone : String
+    - passwordHash : String
+    - role : Role
+    - auditStatus : AuditStatus
+    + hasPermission(p : Permission) : boolean
+  }
+  class Address <<实体>> {
+    - addressId : Long
+    - detail : String
+    - lng : Decimal
+    - lat : Decimal
+    - isDefault : boolean
+  }
+  class Shop <<实体>> {
+    - shopId : Long
+    - name : String
+    - licenseNo : String
+    - address : String
+    - openTime : LocalTime
+    - closeTime : LocalTime
+    - bizStatus : ShopBizStatus
+    + canAcceptOrder(now : LocalDateTime) : boolean
+  }
+  class Dish <<实体>> {
+    - dishId : Long
+    - name : String
+    - category : String
+    - priceCents : int
+    - spec : String
+    - status : DishStatus
+    + changePrice(newPrice : int, operator : Long) : void
+  }
+  class DailyStock <<实体>> {
+    - stockId : Long
+    - bizDate : LocalDate
+    - totalQty : int
+    - soldQty : int
+    + remaining() : int
+    + deduct(qty : int) : boolean
+    + release(qty : int) : void
+  }
+}
+
+package "交易" {
+  class CartItem <<实体>> {
+    - cartItemId : Long
+    - quantity : int
+    - priceWhenAdded : int
+  }
+  class Order <<聚合根>> {
+    - orderId : Long
+    - orderNo : String
+    - totalCents : int
+    - status : OrderStatus
+    - version : int
+    - idempotencyKey : String
+    - addressSnapshot : String
+    - createdAt : LocalDateTime
+    + transitTo(target : OrderStatus, operator : Long) : void
+    + cancellable() : boolean
+  }
+  class OrderItem <<实体>> {
+    - orderItemId : Long
+    - dishName : String
+    - unitPriceCents : int
+    - spec : String
+    - quantity : int
+    + subtotal() : int
+  }
+  class DeliveryTask <<实体>> {
+    - taskId : Long
+    - status : DeliveryStatus
+    - failReason : String
+    - acceptedAt : LocalDateTime
+    - deliveredAt : LocalDateTime
+  }
+  class Refund <<实体>> {
+    - refundId : Long
+    - amountCents : int
+    - status : RefundStatus
+    - failReason : String
+    - retryCount : int
+  }
+  class IdempotencyRecord <<实体>> {
+    - idemKey : String
+    - customerId : Long
+    - orderId : Long
+    - expireAt : LocalDateTime
+  }
+  class StatisticsDaily <<读模型>> {
+    - bizDate : LocalDate
+    - revenueCents : int
+    - orderCount : int
+    - timeoutRate : Decimal
+    - deliveryFailRate : Decimal
+  }
+}
+
+package "审计与事件" {
+  class OperationLog <<实体>> {
+    - logId : Long
+    - actorId : Long
+    - actorRole : Role
+    - action : String
+    - objectId : String
+    - beforeState : String
+    - afterState : String
+    - result : String
+    - createdAt : LocalDateTime
+  }
+  class OutboxEvent <<实体>> {
+    - eventId : Long
+    - eventType : String
+    - payload : String
+    - status : String
+    - retryCount : int
+  }
+}
+
+package "枚举" {
+  enum Role {
+    顾客
+    商家
+    配送人员
+    平台管理员
+  }
+  enum OrderStatus {
+    待接单
+    已接单
+    待取餐
+    配送中
+    已完成
+    已取消
+    已拒单
+    配送失败
+    已退款
+  }
+  enum DeliveryStatus {
+    待接单
+    已接单
+    已取餐
+    已送达
+    配送失败
+  }
+  enum RefundStatus {
+    退款中
+    已退款
+    退款异常
+  }
+  enum ShopBizStatus {
+    营业中
+    已打烊
+    临时停业
+    强制停业
+  }
+  enum DishStatus {
+    在售
+    已下架
+    已售罄
+  }
+}
+
+' ---------- 关联关系 ----------
+User "1" --> "0..*" Address : 拥有
+User "1" --> "0..*" Shop : 经营（商家）
+User "1" --> "0..*" Order : 下单（顾客）
+User "1" --> "0..*" CartItem : 持有
+Shop "1" --> "0..*" Dish : 提供
+Dish "1" --> "0..*" DailyStock : 按日库存
+Dish "1" --> "0..*" OrderItem : 被引用
+
+Order "1" *-- "1..*" OrderItem : 组成
+Order "1" --> "0..1" DeliveryTask : 派送（唯一）
+Order "1" --> "0..1" Refund : 退款（唯一）
+Order --> IdempotencyRecord : 幂等键绑定
+Shop "1" --> "0..*" StatisticsDaily : 日汇总
+
+note bottom of Order
+  状态变更只走 transitTo()：
+  校验白名单 + 版本号乐观锁，
+  非法转换抛异常且不改库（REQ-029）
+end note
+
+note right of Refund
+  与订单状态同事务更新；
+  失败置"退款异常"，
+  绝不置"已退款"（REQ-012）
+end note
+
+note bottom of DailyStock
+  余量 = totalQty - soldQty，
+  扣减用条件更新防超卖（REQ-010）
+end note
+
+@enduml

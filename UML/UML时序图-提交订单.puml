@@ -1,0 +1,77 @@
+@startuml UML时序图-提交订单
+title 外卖点餐与配送系统 —— 时序图：提交订单（幂等 + 库存事务）
+skinparam shadowing false
+skinparam defaultFontName "Microsoft YaHei"
+skinparam sequence {
+  ArrowColor #2C5F8A
+  LifeLineBorderColor #9DB4C8
+  ParticipantBorderColor #2C5F8A
+  ParticipantBackgroundColor #F4F9FD
+  GroupBorderColor #C9862B
+  GroupBackgroundColor #FDF8EC
+}
+
+actor "顾客" as U
+participant "顾客端 H5" as C
+participant "API 网关" as G
+participant "订单服务\nOrderService" as O
+participant "库存服务\nInventoryService" as I
+participant "审计服务\nAuditService" as L
+database "MySQL" as DB
+queue "Outbox" as MQ
+
+U -> C : 点击提交订单
+C -> C : 生成幂等键 KEY\n（本地仅此一次）
+C -> G : POST /orders\n{items, addressId, KEY}
+G -> G : 校验令牌与角色（顾客）
+G -> O : submit(cmd)
+activate O
+
+O -> DB : SELECT 幂等记录 WHERE key=KEY
+alt 幂等键已存在
+  DB --> O : 原订单号
+  O --> G : 返回原订单（200）
+  G --> C : 同一订单号
+  C --> U : 显示"已提交，请勿重复操作"
+else 首次请求
+  O -> DB : BEGIN
+  O -> DB : 校验并重算总额（对比快照）
+  alt 价格已变化
+    O --> G : 409 PRICE_CHANGED
+    G --> C : 提示重新确认
+    C --> U : 展示新旧价格
+  else 价格一致
+    O -> I : deduct(orderItems, bizDate)
+    activate I
+    I -> DB : UPDATE daily_stock\nSET sold=sold+?\nWHERE remain>=?
+    alt 任一行影响行数=0
+      I --> O : false（库存不足）
+      O -> DB : ROLLBACK
+      O --> G : 409 SOLD_OUT
+      G --> C : 提示"该菜品已售罄"
+    else 全部成功
+      I --> O : true
+      deactivate I
+      O -> DB : INSERT order / order_item（价格快照）
+      O -> L : record(SUBMIT_ORDER)
+      activate L
+      L -> DB : INSERT operation_log（同事务）
+      L --> O : ok
+      deactivate L
+      O -> DB : INSERT idempotency_record
+      O -> DB : COMMIT
+      O -> MQ : 发布 ORDER_CREATED
+      O --> G : 201 {orderNo}
+      G --> C : 订单详情
+      C --> U : 进入"等待接单"
+    end
+  end
+end
+deactivate O
+
+note over O, DB
+  订单、明细、库存、幂等记录、日志
+  落在同一本地事务里，任一失败全部回滚
+end note
+
+@enduml
